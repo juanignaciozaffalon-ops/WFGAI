@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Warens Mortgage AI (Beta)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f3f4f6;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .chat-container {
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      max-width: 600px;
+      width: 100%;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      height: 80vh;
+    }
+    .chat-header {
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+    }
+    .chat-header h1 {
+      margin: 0;
+      font-size: 18px;
+      color: #111827;
+    }
+    .chat-header p {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: #6b7280;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+      border-radius: 8px;
+      background: #f9fafb;
+      margin-bottom: 8px;
+    }
+    .message {
+      margin-bottom: 10px;
+      max-width: 90%;
+      line-height: 1.4;
+      font-size: 14px;
+    }
+    .message.user {
+      text-align: right;
+      margin-left: auto;
+    }
+    .bubble {
+      display: inline-block;
+      padding: 8px 10px;
+      border-radius: 12px;
+      white-space: pre-line; /* respeta saltos de línea \n */
+    }
+    .user .bubble {
+      background: #2563eb;
+      color: #ffffff;
+      border-bottom-right-radius: 4px;
+    }
+    .ai .bubble {
+      background: #e5e7eb;
+      color: #111827;
+      border-bottom-left-radius: 4px;
+    }
+    .chat-input {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    textarea {
+      flex: 1;
+      resize: none;
+      border-radius: 12px;
+      border: 1px solid #d1d5db;
+      padding: 8px;
+      font-size: 14px;
+      min-height: 60px;
+      outline: none;
+    }
+    textarea:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px rgba(37,99,235,0.3);
+    }
+    button {
+      border-radius: 12px;
+      border: none;
+      padding: 0 16px;
+      font-size: 14px;
+      background: #2563eb;
+      color: white;
+      cursor: pointer;
+      min-width: 80px;
+    }
+    button:disabled {
+      background: #9ca3af;
+      cursor: default;
+    }
+    .status {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 4px;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <div class="chat-header">
+      <h1>Warens Mortgage AI (Beta)</h1>
+      <p>Describe tu situación (credit score, zona, presupuesto, etc.) y recibe orientación general 🏡</p>
+    </div>
+
+    <div id="messages" class="chat-messages"></div>
+
+    <div class="chat-input">
+      <textarea
+        id="input"
+        placeholder="Ej: Tengo 690 de credit score, busco casa en Katy con 3 habitaciones y no quiero pagar más de $2,500 al mes..."
+      ></textarea>
+      <button id="sendBtn">Enviar</button>
+    </div>
+    <div id="status" class="status"></div>
+  </div>
+
+  <script>
+    const messagesDiv = document.getElementById("messages");
+    const inputEl = document.getElementById("input");
+    const sendBtn = document.getElementById("sendBtn");
+    const statusEl = document.getElementById("status");
+
+    // Historial para mantener contexto con el backend
+    let history = [];
+
+    // Agregar mensaje al chat
+    function addMessage(role, text, animated = false) {
+      const wrapper = document.createElement("div");
+      wrapper.className = `message ${role === "user" ? "user" : "ai"}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+
+      wrapper.appendChild(bubble);
+      messagesDiv.appendChild(wrapper);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+      if (!animated) {
+        bubble.textContent = text;
+        return;
+      }
+
+      // Efecto typing para la AI
+      let index = 0;
+      const speed = 20; // ms por carácter
+
+      function typeChar() {
+        if (index < text.length) {
+          bubble.textContent += text.charAt(index);
+          index++;
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+          setTimeout(typeChar, speed);
+        }
+      }
+
+      typeChar();
+    }
+
+    async function sendMessage() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+
+      // Mostrar mensaje del usuario
+      addMessage("user", text);
+      inputEl.value = "";
+      statusEl.textContent = "Pensando...";
+      sendBtn.disabled = true;
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: text,
+            history,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+          console.error(data.error);
+          statusEl.textContent = "Ocurrió un error. Intenta de nuevo.";
+          sendBtn.disabled = false;
+          return;
+        }
+
+        const reply = data.reply || "Lo siento, no pude generar una respuesta.";
+        // Mensaje de la AI con efecto typewriter
+        addMessage("assistant", reply, true);
+
+        // Actualizamos el historial para que el backend tenga contexto
+        history.push({ role: "user", content: text });
+        history.push({ role: "assistant", content: reply });
+
+        statusEl.textContent = "";
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error de conexión con el servidor.";
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener("click", sendMessage);
+
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+  </script>
+</body>
+</html>
