@@ -132,7 +132,7 @@
   <div class="chat-container">
     <div class="chat-header">
       <h1>Warens Mortgage AI (Beta)</h1>
-      <p>Describe tu situación (credit score, zona, presupuesto, etc.) o envía un audio 🏡</p>
+      <p>Describe tu situación o apretá el micrófono para preguntar por voz 🏡</p>
     </div>
 
     <div id="messages" class="chat-messages"></div>
@@ -217,7 +217,6 @@
       statusEl.textContent = "Pensando...";
       sendBtn.disabled = true;
 
-      // Crear AbortController para poder cortar la request
       const controller = new AbortController();
       currentAbortController = controller;
 
@@ -245,10 +244,8 @@
         }
 
         const reply = data.reply || "Lo siento, no pude generar una respuesta.";
-        // Mensaje de la AI con efecto typewriter
         addMessage("assistant", reply, true);
 
-        // Actualizamos el historial para que el backend tenga contexto
         history.push({ role: "user", content: text });
         history.push({ role: "assistant", content: reply });
 
@@ -268,12 +265,10 @@
     }
 
     function stopCurrent() {
-      // Cortar request al backend
       if (currentAbortController) {
         currentAbortController.abort();
         currentAbortController = null;
       }
-      // Cortar efecto typing
       if (isTyping) {
         stopTyping = true;
         isTyping = false;
@@ -303,7 +298,7 @@
         return null;
       }
       const rec = new SpeechRecognition();
-      rec.lang = "es-ES"; // español; se puede ajustar
+      rec.lang = "es-ES"; // español
       rec.interimResults = false;
       rec.maxAlternatives = 1;
       return rec;
@@ -311,7 +306,7 @@
 
     micBtn.addEventListener("click", () => {
       if (recognizing) {
-        // Si ya está escuchando, lo detenemos
+        // Si ya está escuchando, al tocar de nuevo se detiene
         recognition.stop();
         return;
       }
@@ -328,9 +323,10 @@
 
       recognition.onresult = (event) => {
         const transcript = event.results[0][0].transcript;
-        // Agregamos el texto reconocido al textarea
-        inputEl.value = (inputEl.value ? inputEl.value + " " : "") + transcript;
-        statusEl.textContent = "Audio convertido a texto. Puedes editarlo antes de enviar.";
+        inputEl.value = transcript;
+        statusEl.textContent = "Procesando tu mensaje...";
+        // Enviamos automáticamente el mensaje reconocido
+        sendMessage();
       };
 
       recognition.onerror = (event) => {
@@ -341,8 +337,9 @@
       recognition.onend = () => {
         recognizing = false;
         micBtn.textContent = "🎤";
+        // No pisamos el status si ya dijimos "Procesando tu mensaje..."
         if (!statusEl.textContent) {
-          statusEl.textContent = "Detenido el reconocimiento de voz.";
+          statusEl.textContent = "Reconocimiento de voz detenido.";
         }
       };
     });
