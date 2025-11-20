@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <title>Warens Mortgage AI (Beta)</title>
@@ -63,7 +63,7 @@
       display: inline-block;
       padding: 8px 10px;
       border-radius: 12px;
-      white-space: pre-line; /* respeta saltos de línea \n */
+      white-space: pre-line; /* respeta saltos de línea */
     }
     .user .bubble {
       background: #2563eb;
@@ -76,12 +76,13 @@
       border-bottom-left-radius: 4px;
     }
     .chat-input {
-      display: flex;
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
       gap: 8px;
+      align-items: stretch;
       margin-top: 4px;
     }
     textarea {
-      flex: 1;
       resize: none;
       border-radius: 12px;
       border: 1px solid #d1d5db;
@@ -97,12 +98,23 @@
     button {
       border-radius: 12px;
       border: none;
-      padding: 0 16px;
+      padding: 0 12px;
       font-size: 14px;
       background: #2563eb;
       color: white;
       cursor: pointer;
-      min-width: 80px;
+      min-width: 60px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    button.secondary {
+      background: #6b7280;
+    }
+    button.icon {
+      min-width: 40px;
+      padding: 0;
     }
     button:disabled {
       background: #9ca3af;
@@ -120,17 +132,21 @@
   <div class="chat-container">
     <div class="chat-header">
       <h1>Warens Mortgage AI (Beta)</h1>
-      <p>Describe tu situación (credit score, zona, presupuesto, etc.) y recibe orientación general 🏡</p>
+      <p>Describe tu situación (credit score, zona, presupuesto, etc.) o envía un audio 🏡</p>
     </div>
 
     <div id="messages" class="chat-messages"></div>
 
     <div class="chat-input">
+      <button id="micBtn" class="icon" title="Hablar">
+        🎤
+      </button>
       <textarea
         id="input"
         placeholder="Ej: Tengo 690 de credit score, busco casa en Katy con 3 habitaciones y no quiero pagar más de $2,500 al mes..."
       ></textarea>
       <button id="sendBtn">Enviar</button>
+      <button id="stopBtn" class="secondary">Stop</button>
     </div>
     <div id="status" class="status"></div>
   </div>
@@ -139,10 +155,16 @@
     const messagesDiv = document.getElementById("messages");
     const inputEl = document.getElementById("input");
     const sendBtn = document.getElementById("sendBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const micBtn = document.getElementById("micBtn");
     const statusEl = document.getElementById("status");
 
-    // Historial para mantener contexto con el backend
     let history = [];
+
+    // Control para Stop
+    let currentAbortController = null;
+    let isTyping = false;
+    let stopTyping = false;
 
     // Agregar mensaje al chat
     function addMessage(role, text, animated = false) {
@@ -164,13 +186,21 @@
       // Efecto typing para la AI
       let index = 0;
       const speed = 20; // ms por carácter
+      isTyping = true;
+      stopTyping = false;
 
       function typeChar() {
+        if (stopTyping) {
+          isTyping = false;
+          return;
+        }
         if (index < text.length) {
           bubble.textContent += text.charAt(index);
           index++;
           messagesDiv.scrollTop = messagesDiv.scrollHeight;
           setTimeout(typeChar, speed);
+        } else {
+          isTyping = false;
         }
       }
 
@@ -187,6 +217,10 @@
       statusEl.textContent = "Pensando...";
       sendBtn.disabled = true;
 
+      // Crear AbortController para poder cortar la request
+      const controller = new AbortController();
+      currentAbortController = controller;
+
       try {
         const response = await fetch("/api/chat", {
           method: "POST",
@@ -197,6 +231,7 @@
             message: text,
             history,
           }),
+          signal: controller.signal,
         });
 
         const data = await response.json();
@@ -205,6 +240,7 @@
           console.error(data.error);
           statusEl.textContent = "Ocurrió un error. Intenta de nuevo.";
           sendBtn.disabled = false;
+          currentAbortController = null;
           return;
         }
 
@@ -218,20 +254,97 @@
 
         statusEl.textContent = "";
       } catch (err) {
-        console.error(err);
-        statusEl.textContent = "Error de conexión con el servidor.";
+        if (err.name === "AbortError") {
+          console.warn("Solicitud abortada por el usuario.");
+          statusEl.textContent = "Respuesta detenida.";
+        } else {
+          console.error(err);
+          statusEl.textContent = "Error de conexión con el servidor.";
+        }
       } finally {
         sendBtn.disabled = false;
+        currentAbortController = null;
       }
     }
 
+    function stopCurrent() {
+      // Cortar request al backend
+      if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+      }
+      // Cortar efecto typing
+      if (isTyping) {
+        stopTyping = true;
+        isTyping = false;
+      }
+      statusEl.textContent = "Respuesta detenida.";
+      sendBtn.disabled = false;
+    }
+
     sendBtn.addEventListener("click", sendMessage);
+    stopBtn.addEventListener("click", stopCurrent);
 
     inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
       }
+    });
+
+    // --- VOICE TO TEXT (Web Speech API) ---
+    let recognizing = false;
+    let recognition = null;
+
+    function initSpeechRecognition() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert("Tu navegador no soporta reconocimiento de voz. Probá con Chrome.");
+        return null;
+      }
+      const rec = new SpeechRecognition();
+      rec.lang = "es-ES"; // español; se puede ajustar
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      return rec;
+    }
+
+    micBtn.addEventListener("click", () => {
+      if (recognizing) {
+        // Si ya está escuchando, lo detenemos
+        recognition.stop();
+        return;
+      }
+
+      if (!recognition) {
+        recognition = initSpeechRecognition();
+        if (!recognition) return;
+      }
+
+      recognition.start();
+      recognizing = true;
+      micBtn.textContent = "🎙️";
+      statusEl.textContent = "Escuchando... habla cerca del micrófono.";
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        // Agregamos el texto reconocido al textarea
+        inputEl.value = (inputEl.value ? inputEl.value + " " : "") + transcript;
+        statusEl.textContent = "Audio convertido a texto. Puedes editarlo antes de enviar.";
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error:", event.error);
+        statusEl.textContent = "Hubo un problema con el micrófono.";
+      };
+
+      recognition.onend = () => {
+        recognizing = false;
+        micBtn.textContent = "🎤";
+        if (!statusEl.textContent) {
+          statusEl.textContent = "Detenido el reconocimiento de voz.";
+        }
+      };
     });
   </script>
 </body>
